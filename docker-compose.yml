@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  # === BACKEND SERVICES ===
+  omnibase-api:
+    build:
+      context: ./OmniBaseBackendNew
+      dockerfile: Dockerfile
+    container_name: omnibase-api
+    ports:
+      - "8001:8000"  # API - unikanie konfliktu z AtlasShift (8000)
+      - "8083:8083"  # WebSocket - Laravel Reverb
+    environment:
+      - APP_ENV=local
+      - APP_DEBUG=true
+      - APP_URL=http://localhost:8001
+      - INDUSTRY=${INDUSTRY:-beauty}  # ← KLUCZOWA ZMIENNA!
+      - DB_CONNECTION=pgsql
+      - DB_HOST=omnibase-postgres
+      - DB_PORT=5432
+      - DB_DATABASE=omnibase
+      - DB_USERNAME=omnibase
+      - DB_PASSWORD=secret
+      - REDIS_HOST=omnibase-redis
+      - REDIS_PORT=6379
+      - BROADCAST_CONNECTION=reverb
+      - REVERB_APP_ID=omnibase_local
+      - REVERB_APP_KEY=omnibase_key_local
+      - REVERB_APP_SECRET=omnibase_secret_local
+      - REVERB_HOST=0.0.0.0
+      - REVERB_PORT=8083
+      - REVERB_SCHEME=http
+      - QUEUE_CONNECTION=redis
+    # volumes:
+      # - ./OmniBaseBackendNew:/var/www:cached
+      # - /var/www/vendor
+      # - /var/www/node_modules
+    depends_on:
+      - omnibase-postgres
+      - omnibase-redis
+    networks:
+      - omnibase-net
+    restart: unless-stopped
+
+  # === FRONTEND ===
+  omnibase-frontend:
+    build:
+      context: ./OmniBaseFrontend
+      dockerfile: Dockerfile
+    container_name: omnibase_frontend
+    ports:
+      - "5173:5173"  # Vite dev server - bez konfliktu
+    environment:
+      - VITE_API_URL=http://localhost:8001
+      - VITE_WS_HOST=127.0.0.1
+      - VITE_WS_PORT=8083
+      - VITE_WS_SCHEME=ws
+      - VITE_INDUSTRY=${INDUSTRY:-beauty}  # ← Frontend wie jaka branża
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
+    # volumes:
+      # - ./OmniBaseFrontend:/app:cached
+      # - /app/node_modules
+    depends_on:
+      - omnibase-api
+    networks:
+      - omnibase-net
+    restart: unless-stopped
+
+  # === DATABASE ===
+  omnibase-postgres:
+    image: postgres:15-alpine
+    container_name: omnibase-postgres
+    ports:
+      - "5433:5432"  # Unikanie konfliktu z istniejącym PostgreSQL (5432)
+    environment:
+      POSTGRES_DB: omnibase
+      POSTGRES_USER: omnibase
+      POSTGRES_PASSWORD: secret
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=pl_PL.UTF-8 --lc-ctype=pl_PL.UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    networks:
+      - omnibase-net
+    restart: unless-stopped
+
+  # === REDIS ===
+  omnibase-redis:
+    image: redis:7-alpine
+    container_name: omnibase-redis
+    ports:
+      - "6380:6379"  # Unikanie konfliktu z istniejącym Redis (6379)
+    command: redis-server --appendonly yes --requirepass ""
+    volumes:
+      - redis_data:/data
+    networks:
+      - omnibase-net
+    restart: unless-stopped
+
+  # === PGADMIN ===
+  omnibase-pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: omnibase-pgadmin
+    ports:
+      - "5050:80"  # Nowy port dla pgAdmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - omnibase-postgres
+    networks:
+      - omnibase-net
+    restart: unless-stopped
+
+networks:
+  omnibase-net:
+    driver: bridge
+    name: omnibase-network
+
+volumes:
+  postgres_data:
+    name: omnibase-postgres-data
+  redis_data:
+    name: omnibase-redis-data
+  pgadmin_data:
+    name: omnibase-pgadmin-data
